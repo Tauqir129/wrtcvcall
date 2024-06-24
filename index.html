@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Call App</title>
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>Video Call App</h1>
+    <div>
+        <label for="channelId">Channel ID:</label>
+        <input type="text" id="channelId" value="">
+        <button onclick="joinChannel()">Join Channel</button>
+    </div>
+    <div id="videos">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <script>
+        const socket = io();
+        let localStream;
+
+        // Function to join a channel
+        function joinChannel() {
+            const channelId = document.getElementById('channelId').value;
+            socket.emit('join', channelId);
+
+            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                .then(stream => {
+                    localStream = stream;
+                    document.getElementById('localVideo').srcObject = stream;
+
+                    const peerConnection = new RTCPeerConnection({
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' } // Google's free STUN server
+                        ]
+                    });
+
+                    // Add local stream to peer connection
+                    stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+                    // Handle incoming signals
+                    socket.on('signal', async data => {
+                        if (data.type === 'offer') {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                            const answer = await peerConnection.createAnswer();
+                            await peerConnection.setLocalDescription(answer);
+
+                            socket.emit('signal', { room: channelId, type: 'answer', answer: answer });
+                        } else if (data.type === 'answer') {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                        } else if (data.type === 'candidate') {
+                            try {
+                                await peerConnection.addIceCandidate(data.candidate);
+                            } catch (e) {
+                                console.error('Error adding ice candidate:', e);
+                            }
+                        }
+                    });
+
+                    // Send offer to remote peer
+                    peerConnection.onnegotiationneeded = async () => {
+                        const offer = await peerConnection.createOffer();
+                        await peerConnection.setLocalDescription(offer);
+
+                        socket.emit('signal', { room: channelId, type: 'offer', offer: offer });
+                    };
+
+                    // Send ICE candidate to remote peer
+                    peerConnection.onicecandidate = event => {
+                        if (event.candidate) {
+                            socket.emit('signal', { room: channelId, type: 'candidate', candidate: event.candidate });
+                        }
+                    };
+
+                    // Receive remote stream
+                    peerConnection.ontrack = event => {
+                        document.getElementById('remoteVideo').srcObject = event.streams[0];
+                    };
+                })
+                .catch(error => console.error('Error accessing media devices:', error));
+        }
+    </script>
+</body>
+</html>

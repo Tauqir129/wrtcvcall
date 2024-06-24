@@ -8,6 +8,6 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "PORT": "3000"  // Ensure PORT value is a string
+    "PORT": "3000"
   }
 }
